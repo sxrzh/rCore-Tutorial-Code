@@ -42,23 +42,22 @@ const SYS_TRACE_READMEM: usize = 0;
 const SYS_TRACE_WRITEMEM: usize = 1;
 const SYS_TRACE_COUNT_SYSCALL: usize = 2;
 
-// TODO: implement the syscall
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
-    match _trace_request {
+    match trace_request {
         SYS_TRACE_READMEM => {
             unsafe {
-                *(_id as *const u8) as isize
+                *(id as *const u8) as isize
             }
         }
         SYS_TRACE_WRITEMEM => {
             unsafe {
-                *(_id as *mut u8) = _data as u8;
+                *(id as *mut u8) = data as u8;
                 0
             }
         }
         SYS_TRACE_COUNT_SYSCALL => {
-            TASK_MANAGER.get_syscall_count(_id) as isize
+            TASK_MANAGER.get_syscall_count(id) as isize
         }
         _ => -1
     }
