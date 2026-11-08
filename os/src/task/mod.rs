@@ -19,6 +19,9 @@ use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
 use lazy_static::*;
 use switch::__switch;
+
+use crate::syscall::MAX_SYSCALL_ID;
+
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -38,6 +41,19 @@ pub struct TaskManager {
     /// use inner value to get mutable access
     inner: UPSafeCell<TaskManagerInner>,
 }
+impl TaskManager {
+    /// record a syscall to the inner syscall_cnt
+    pub fn record_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        inner.record_syscall(syscall_id);
+    }
+
+    /// get recorded syscall count
+    pub fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.get_syscall_count(syscall_id)
+    }
+}
 
 /// Inner of Task Manager
 pub struct TaskManagerInner {
@@ -45,6 +61,19 @@ pub struct TaskManagerInner {
     tasks: [TaskControlBlock; MAX_APP_NUM],
     /// id of current `Running` task
     current_task: usize,
+    /// count of syscalls 
+    syscall_cnt: [[usize; MAX_SYSCALL_ID + 1]; MAX_APP_NUM],
+}
+impl TaskManagerInner {
+    fn record_syscall(&mut self, syscall_id: usize) {
+        self.syscall_cnt[self.current_task][syscall_id] += 1;
+    }
+    fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        self.syscall_cnt[self.current_task][syscall_id]
+    }
+    // fn clear_trace(&mut self) {
+    //     self.syscall_cnt = [[0; MAX_SYSCALL_ID + 1]; MAX_APP_NUM]
+    // }
 }
 
 lazy_static! {
@@ -65,6 +94,7 @@ lazy_static! {
                 UPSafeCell::new(TaskManagerInner {
                     tasks,
                     current_task: 0,
+                    syscall_cnt: [[0; MAX_SYSCALL_ID + 1]; MAX_APP_NUM],
                 })
             },
         }
