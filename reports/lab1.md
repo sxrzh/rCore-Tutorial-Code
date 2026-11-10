@@ -23,9 +23,23 @@
 
 > [kernel] IllegalInstruction in application, kernel killed it.
 
-### 2. trap.S 中两个函数的作用  
+### 2. trap.S 的理解
 
-1. L40: 刚进入 `__resotre` 时，`sp` 代表 kernel stack 栈顶指针。
+1. L40: 刚进入 `__resotre` 时，`sp` 代表保存了 Trap 上下文后的内核栈栈顶指针。两种使用情景：  
+    1. 启动一个 app 运行第一个任务时（`run_first_task`），通过 `TaskContext::goto_restore` 中设置的 `ra` 寄存器返回到 `__restore`，初始化寄存器并从 S 态进入 U 态；
+    2. 每次 trap 结束时，通过 `__restore` 从 Trap 上下文恢复 `__alltraps` 保存的寄存器值，并从 S 态返回 U 态。
+
+2. L43-L48：特殊处理了 `sstatus`, `sepc`, `sscratch` 寄存器，它们都是需要 S 模式才能访问的 CSR 寄存器。`sstatus` 指定从 S 模式返回后的 S 状态（其中 SPP 位记录进入 trap 前的特权级），指定返回后为 U 特权级模式；`sepc` 指定 trap 的返回地址；`sscratch` 存储进入 trap 前的用户栈顶指针，之后恢复到 `sp` 寄存器。  
+
+3. L50-L56：`x2` 就是 `sp`，保存在 `2*8(sp)` 和 `sscratch`，`csrrw sp, sscratch, sp` 就是恢复 `x2`；`x4` 是线程指针寄存器 `tp`，目前单线程系统中不使用。  
+
+4. L60：该指令后 `sp` 是用户栈栈顶，`sscratch` 是释放 trap 上下文后的内核栈栈顶。  
+
+5. `__restore` 中发生状态切换在 `sret` 指令。该指令执行后由于 `sstatus` 寄存器中的 SPP 位为 0（User）故进入用户态。
+
+6. L13：该指令后 `sp` 是分配 trap 上下文前的内核栈栈顶，`sscratch` 是用户栈栈顶。
+
+7. 从 U 态进入 S 态是在用户库的 `syscall.rs` 中调用 `ecall` 指令时。
 
 ## 荣誉准则
 
