@@ -58,7 +58,6 @@ impl MemorySet {
         end_va: VirtAddr,
         permission: MapPermission,
     ) {
-        trace!("insert_framed_area start = 0x{:x}, end = {:x}, permission = {:b}", start_va.0, end_va.0, permission);
         self.push(
             MapArea::new(start_va, end_va, MapType::Framed, permission),
             None,
@@ -276,11 +275,9 @@ impl MemorySet {
     pub fn map(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
         if start.0 % PAGE_SIZE != 0 { return false; }
 
-        trace!("memory_set.map(start = 0x{:x}, len = {}, permission = {:b})", start.0, len, permission);
         let vpn_begin = VirtAddr::from(start).floor();
         let vpn_end = VirtAddr::from(start.0 + len).ceil();
         let end: VirtAddr = vpn_end.into();
-        trace!("vpn_begin = 0x{:x}, vpn_end = 0x{:x}, end = 0x{:x})", vpn_begin.0, vpn_end.0, end.0);
 
         if let Some(_) = self
             .areas

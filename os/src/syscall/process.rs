@@ -64,7 +64,6 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
     match trace_request {
         0 => {
-            trace!("try reading {} (0x{:x})", id, id);
             if let Some(byte) = TASK_MANAGER.get_memory(id, true) {
                 byte as isize
             }
@@ -81,17 +80,11 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     }
 }
 
-// YOUR JOB: Implement mmap.
+/// map virtual memory
 pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     trace!("kernel: sys_mmap");
-    trace!("kernel: prot = {:b}", prot);
     if prot & 0x7 == 0 { return -1; }
     if prot & !0x7 != 0 { return -1; }
-
-    trace!("kernel: permission = {:b} | {:b} = {:b}", 
-        MapPermission::from_bits_truncate((prot << 1) as u8),
-        MapPermission::U,
-        MapPermission::from_bits_truncate((prot << 1) as u8) | MapPermission::U);
     if TASK_MANAGER.map(start.into(), len, 
         MapPermission::from_bits_truncate((prot << 1) as u8) | MapPermission::U) {
             0
@@ -101,9 +94,9 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
         }
 }
 
-// YOUR JOB: Implement munmap.
+/// unmap virtual memory
 pub fn sys_munmap(start: usize, len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
+    trace!("kernel: sys_munmap");
     if TASK_MANAGER.unmap(start.into(), len) {
         0
     }
@@ -111,6 +104,7 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
         -1
     }
 }
+
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
     trace!("kernel: sys_sbrk");

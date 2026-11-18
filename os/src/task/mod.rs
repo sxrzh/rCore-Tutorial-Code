@@ -108,7 +108,6 @@ impl TaskManagerInner {
     /// implement TaskManager::get_memory
     fn get_memory(&self, virt_addr: VirtAddr, is_user: bool) -> Option<u8> {
         let phys_addr: PhysAddr = self.translate_address(virt_addr, is_user, false)?;
-        trace!("phys_addr = {}", phys_addr.0);
         unsafe { Some(*(phys_addr.0 as *const u8)) }
     }
     
