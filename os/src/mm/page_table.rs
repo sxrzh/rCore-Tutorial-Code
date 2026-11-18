@@ -58,6 +58,10 @@ impl PageTableEntry {
     pub fn is_valid(&self) -> bool {
         (self.flags() & PTEFlags::V) != PTEFlags::empty()
     }
+    /// The page pointered by page table entry is accesible for user?
+    pub fn is_user(&self) -> bool {
+        (self.flags() & PTEFlags::U) != PTEFlags::empty()
+    }
     /// The page pointered by page table entry is readable?
     pub fn readable(&self) -> bool {
         (self.flags() & PTEFlags::R) != PTEFlags::empty()
@@ -119,9 +123,12 @@ impl PageTable {
     fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
+        trace!("find_pte {} ({:b})", vpn.0, vpn.0);
         let mut result: Option<&mut PageTableEntry> = None;
         for (i, idx) in idxs.iter().enumerate() {
+            trace!("i = {}, idx = {}, ppn = {} ({:b})", i, idx, ppn.0, ppn.0);
             let pte = &mut ppn.get_pte_array()[*idx];
+            trace!("pte = {} ({:b})", pte.bits, pte.bits);
             if i == 2 {
                 result = Some(pte);
                 break;
@@ -130,6 +137,10 @@ impl PageTable {
                 return None;
             }
             ppn = pte.ppn();
+            trace!("new ppn = {} ({:b})", ppn.0, ppn.0);
+        }
+        if let Some(x) = &result {
+            trace!("result: {:b}", x.bits);
         }
         result
     }
@@ -149,6 +160,7 @@ impl PageTable {
     }
     /// get the page table entry from the virtual page number
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        trace!("page_table.translate {}", vpn.0);
         self.find_pte(vpn).map(|pte| *pte)
     }
     /// get the token from the page table

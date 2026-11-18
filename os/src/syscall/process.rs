@@ -45,7 +45,7 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     }
 
     for i in 0..SIZE {
-        if let Some(phys_addr) = TASK_MANAGER.translate_address((ts as usize + i).into()) {
+        if let Some(phys_addr) = TASK_MANAGER.translate_address((ts as usize + i).into(), true, true) {
             unsafe {
                 let ts_real = phys_addr.0 as *mut u8;
                 *ts_real = data[i];
@@ -63,8 +63,9 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
     match trace_request {
-        0 => { 
-            if let Some(byte) = TASK_MANAGER.get_memory(id) {
+        0 => {
+            trace!("try reading {} (0x{:x})", id, id);
+            if let Some(byte) = TASK_MANAGER.get_memory(id, true) {
                 byte as isize
             }
             else {
@@ -72,7 +73,7 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
             }
         }
         1 => { 
-            if let Some(()) = TASK_MANAGER.set_memory(id, data as u8) { 1 }
+            if let Some(()) = TASK_MANAGER.set_memory(id, data as u8, true) { 0 }
             else { -1 }
         }
         2 => { TASK_MANAGER.get_syscall_count(id) as isize }
@@ -82,12 +83,17 @@ pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
 
 // YOUR JOB: Implement mmap.
 pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
+    trace!("kernel: sys_mmap");
+    trace!("kernel: prot = {:b}", prot);
     if prot & 0x7 == 0 { return -1; }
     if prot & !0x7 != 0 { return -1; }
 
+    trace!("kernel: permission = {:b} | {:b} = {:b}", 
+        MapPermission::from_bits_truncate((prot << 1) as u8),
+        MapPermission::U,
+        MapPermission::from_bits_truncate((prot << 1) as u8) | MapPermission::U);
     if TASK_MANAGER.map(start.into(), len, 
-        MapPermission::from_bits_truncate(prot as u8) | MapPermission::U) {
+        MapPermission::from_bits_truncate((prot << 1) as u8) | MapPermission::U) {
             0
         }
         else {

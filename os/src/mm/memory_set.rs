@@ -58,6 +58,7 @@ impl MemorySet {
         end_va: VirtAddr,
         permission: MapPermission,
     ) {
+        trace!("insert_framed_area start = 0x{:x}, end = {:x}, permission = {:b}", start_va.0, end_va.0, permission);
         self.push(
             MapArea::new(start_va, end_va, MapType::Framed, permission),
             None,
@@ -233,6 +234,14 @@ impl MemorySet {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
     }
+    /// Translate a virtual page number to a page table entry
+    pub fn translate_permitted(&self, vpn: VirtPageNum, is_user: bool, need_write: bool) -> Option<PageTableEntry> {
+        let pte = self.page_table.translate(vpn)?;
+        if !pte.readable() { None }
+        else if is_user && !pte.is_user() { None } 
+        else if need_write && !pte.writable() { None}
+        else { Some(pte) }
+    }
     /// shrink the area to new_end
     #[allow(unused)]
     pub fn shrink_to(&mut self, start: VirtAddr, new_end: VirtAddr) -> bool {
@@ -267,9 +276,11 @@ impl MemorySet {
     pub fn map(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
         if start.0 % PAGE_SIZE != 0 { return false; }
 
+        trace!("memory_set.map(start = 0x{:x}, len = {}, permission = {:b})", start.0, len, permission);
         let vpn_begin = VirtAddr::from(start).floor();
         let vpn_end = VirtAddr::from(start.0 + len).ceil();
         let end: VirtAddr = vpn_end.into();
+        trace!("vpn_begin = 0x{:x}, vpn_end = 0x{:x}, end = 0x{:x})", vpn_begin.0, vpn_end.0, end.0);
 
         if let Some(_) = self
             .areas

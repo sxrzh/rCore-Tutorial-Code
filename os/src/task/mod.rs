@@ -44,21 +44,21 @@ pub struct TaskManager {
 
 impl TaskManager {
     /// translate a virtual address to physical address
-    pub fn translate_address(&self, virt_addr: VirtAddr) -> Option<PhysAddr> {
+    pub fn translate_address(&self, virt_addr: VirtAddr, is_user: bool, need_write: bool) -> Option<PhysAddr> {
         let inner = self.inner.exclusive_access();
-        inner.translate_address(virt_addr)
+        inner.translate_address(virt_addr, is_user, need_write)
     }
 
     /// get a byte of a specific virtual address
-    pub fn get_memory(&self, virt_addr: usize) -> Option<u8> {
+    pub fn get_memory(&self, virt_addr: usize, is_user: bool) -> Option<u8> {
         let inner = self.inner.exclusive_access();
-        inner.get_memory(VirtAddr::from(virt_addr))
+        inner.get_memory(VirtAddr::from(virt_addr), is_user)
     }
 
     /// set a byte of a specific virtual address
-    pub fn set_memory(&self, virt_addr: usize, value: u8) -> Option<()> {
+    pub fn set_memory(&self, virt_addr: usize, value: u8, is_user: bool) -> Option<()> {
         let inner = self.inner.exclusive_access();
-        inner.set_memory(VirtAddr::from(virt_addr), value)
+        inner.set_memory(VirtAddr::from(virt_addr), value, is_user)
     }
 
     /// map virtual address [start, start + len) to physical address, aligned to PAGE_SIZE
@@ -96,24 +96,25 @@ struct TaskManagerInner {
 
 impl TaskManagerInner {
     /// implement translate_address
-    fn translate_address(&self, virt_addr: VirtAddr) -> Option<PhysAddr> {
+    fn translate_address(&self, virt_addr: VirtAddr, is_user: bool, need_write: bool) -> Option<PhysAddr> {
         let block = &self.tasks[self.current_task];
         let ppn = &block.memory_set
-                      .translate(virt_addr.floor())?
+                      .translate_permitted(virt_addr.floor(), is_user, need_write)?
                       .ppn();
         let phys_addr: PhysAddr = (ppn.0 * PAGE_SIZE + virt_addr.page_offset()).into();
         Some(phys_addr)
     }
 
     /// implement TaskManager::get_memory
-    fn get_memory(&self, virt_addr: VirtAddr) -> Option<u8> {
-        let phys_addr: PhysAddr = self.translate_address(virt_addr)?;
+    fn get_memory(&self, virt_addr: VirtAddr, is_user: bool) -> Option<u8> {
+        let phys_addr: PhysAddr = self.translate_address(virt_addr, is_user, false)?;
+        trace!("phys_addr = {}", phys_addr.0);
         unsafe { Some(*(phys_addr.0 as *const u8)) }
     }
     
     /// implement TaskManager::set_memory
-    fn set_memory(&self, virt_addr: VirtAddr, byte: u8) -> Option<()> {
-        let phys_addr: PhysAddr = self.translate_address(virt_addr)?;
+    fn set_memory(&self, virt_addr: VirtAddr, byte: u8, is_user: bool) -> Option<()> {
+        let phys_addr: PhysAddr = self.translate_address(virt_addr, is_user, true)?;
         unsafe { *(phys_addr.0 as *mut u8) = byte; }
         Some(())
     }
