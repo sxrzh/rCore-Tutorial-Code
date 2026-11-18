@@ -14,6 +14,7 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::config::PAGE_SIZE;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
@@ -21,6 +22,7 @@ use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+use crate::mm::{MapPermission, PhysAddr, VirtAddr};
 
 pub use context::TaskContext;
 
@@ -40,12 +42,103 @@ pub struct TaskManager {
     inner: UPSafeCell<TaskManagerInner>,
 }
 
+impl TaskManager {
+    /// translate a virtual address to physical address
+    pub fn translate_address(&self, virt_addr: VirtAddr) -> Option<PhysAddr> {
+        let inner = self.inner.exclusive_access();
+        inner.translate_address(virt_addr)
+    }
+
+    /// get a byte of a specific virtual address
+    pub fn get_memory(&self, virt_addr: usize) -> Option<u8> {
+        let inner = self.inner.exclusive_access();
+        inner.get_memory(VirtAddr::from(virt_addr))
+    }
+
+    /// set a byte of a specific virtual address
+    pub fn set_memory(&self, virt_addr: usize, value: u8) -> Option<()> {
+        let inner = self.inner.exclusive_access();
+        inner.set_memory(VirtAddr::from(virt_addr), value)
+    }
+
+    /// map virtual address [start, start + len) to physical address, aligned to PAGE_SIZE
+    pub fn map(&self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        inner.map(start, len, permission)
+    }
+
+    /// unmap virtual address [start, start + len)
+    pub fn unmap(&self, start: VirtAddr, len: usize) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        inner.unmap(start, len)
+    }
+
+    /// record a syscall to the inner syscall_cnt
+    pub fn record_syscall(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        inner.record_syscall(syscall_id);
+    }
+
+    /// get recorded syscall count
+    pub fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.get_syscall_count(syscall_id)
+    }
+}
+
 /// The task manager inner in 'UPSafeCell'
 struct TaskManagerInner {
     /// task list
     tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
     current_task: usize,
+}
+
+impl TaskManagerInner {
+    /// implement translate_address
+    fn translate_address(&self, virt_addr: VirtAddr) -> Option<PhysAddr> {
+        let block = &self.tasks[self.current_task];
+        let ppn = &block.memory_set
+                      .translate(virt_addr.floor())?
+                      .ppn();
+        let phys_addr: PhysAddr = (ppn.0 * PAGE_SIZE + virt_addr.page_offset()).into();
+        Some(phys_addr)
+    }
+
+    /// implement TaskManager::get_memory
+    fn get_memory(&self, virt_addr: VirtAddr) -> Option<u8> {
+        let phys_addr: PhysAddr = self.translate_address(virt_addr)?;
+        unsafe { Some(*(phys_addr.0 as *const u8)) }
+    }
+    
+    /// implement TaskManager::set_memory
+    fn set_memory(&self, virt_addr: VirtAddr, byte: u8) -> Option<()> {
+        let phys_addr: PhysAddr = self.translate_address(virt_addr)?;
+        unsafe { *(phys_addr.0 as *mut u8) = byte; }
+        Some(())
+    }
+
+    /// implement TaskManager::map
+    fn map(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
+        let block = &mut self.tasks[self.current_task];
+        block.memory_set.map(start, len, permission)
+    }
+
+    /// implement TaskManager::unmap
+    fn unmap(&mut self, start: VirtAddr, len: usize) -> bool {
+        let block = &mut self.tasks[self.current_task];
+        block.memory_set.unmap(start, len)
+    }
+
+    /// implement TaskManager::record_syscall
+    fn record_syscall(&mut self, syscall_id: usize) {
+        self.tasks[self.current_task].record_syscall(syscall_id);
+    }
+
+    /// implement TaskManager::get_syscall_count
+    fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        self.tasks[self.current_task].get_syscall_count(syscall_id)
+    }
 }
 
 lazy_static! {

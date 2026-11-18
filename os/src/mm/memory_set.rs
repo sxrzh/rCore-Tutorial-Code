@@ -262,6 +262,55 @@ impl MemorySet {
             false
         }
     }
+
+    /// map: allocate space (may create a new area) and do the mapping
+    pub fn map(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
+        if start.0 % PAGE_SIZE != 0 { return false; }
+
+        let vpn_begin = VirtAddr::from(start).floor();
+        let vpn_end = VirtAddr::from(start.0 + len).ceil();
+        let end: VirtAddr = vpn_end.into();
+
+        if let Some(_) = self
+            .areas
+            .iter_mut()
+            .find(|area| area.vpn_range.get_start() < vpn_end && area.vpn_range.get_end() > vpn_begin )
+        {
+            // range contains allocated page
+            false
+        }
+        else {
+            self.insert_framed_area(start, end, permission);
+            true
+        } 
+    }
+
+    /// unmap virtual address [start, start + len)
+    pub fn unmap(&mut self, start: VirtAddr, len: usize) -> bool {
+        if start.0 % PAGE_SIZE != 0 { return false; }       // The tutorail doesn't mention this.
+
+        let vpn_begin = VirtAddr::from(start).floor();
+        let vpn_end = VirtAddr::from(start.0 + len).ceil();
+
+        if let Some(area) = self
+            .areas
+            .iter_mut()
+            .find(|area| area.vpn_range.get_start() == vpn_begin)
+        {
+            // range contains unallocated page
+            if area.vpn_range.get_end() < vpn_end {
+                false
+            }
+            else {
+                area.shrink_left_to(&mut self.page_table, vpn_end);
+                true
+            }
+        }
+        else {
+            // start is unallocated or is not an address returned by map
+            false
+        } 
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
@@ -326,6 +375,12 @@ impl MapArea {
             self.unmap_one(page_table, vpn)
         }
         self.vpn_range = VPNRange::new(self.vpn_range.get_start(), new_end);
+    }
+    pub fn shrink_left_to(&mut self, page_table: &mut PageTable, new_start: VirtPageNum) {
+        for vpn in VPNRange::new(self.vpn_range.get_start(),new_start) {
+            self.unmap_one(page_table, vpn)
+        }
+        self.vpn_range = VPNRange::new(new_start, self.vpn_range.get_end());
     }
     #[allow(unused)]
     pub fn append_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
