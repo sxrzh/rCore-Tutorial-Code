@@ -1,8 +1,8 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::config::{TRAP_CONTEXT_BASE, PAGE_SIZE};
+use crate::mm::{MapPermission, MemorySet, PhysAddr, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
@@ -84,6 +84,33 @@ impl TaskControlBlockInner {
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
+    }
+    
+    pub fn translate_address(&self, virt_addr: VirtAddr, is_user: bool, need_write: bool) -> Option<PhysAddr> {
+        let ppn = &self.memory_set
+                      .translate_permitted(virt_addr.floor(), is_user, need_write)?
+                      .ppn();
+        let phys_addr: PhysAddr = (ppn.0 * PAGE_SIZE + virt_addr.page_offset()).into();
+        Some(phys_addr)
+    }
+
+    pub fn get_memory(&self, virt_addr: VirtAddr, is_user: bool) -> Option<u8> {
+        let phys_addr: PhysAddr = self.translate_address(virt_addr, is_user, false)?;
+        unsafe { Some(*(phys_addr.0 as *const u8)) }
+    }
+    
+    pub fn set_memory(&self, virt_addr: VirtAddr, byte: u8, is_user: bool) -> Option<()> {
+        let phys_addr: PhysAddr = self.translate_address(virt_addr, is_user, true)?;
+        unsafe { *(phys_addr.0 as *mut u8) = byte; }
+        Some(())
+    }
+
+    pub fn map(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
+        self.memory_set.map(start, len, permission)
+    }
+
+    pub fn unmap(&mut self, start: VirtAddr, len: usize) -> bool {
+        self.memory_set.unmap(start, len)
     }
 }
 

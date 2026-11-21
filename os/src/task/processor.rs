@@ -7,6 +7,7 @@
 use super::__switch;
 use super::{fetch_task, TaskStatus};
 use super::{TaskContext, TaskControlBlock};
+use crate::mm::{MapPermission, PhysAddr, VirtAddr};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::sync::Arc;
@@ -44,9 +45,42 @@ impl Processor {
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
     }
+
+    /// translate a virtual address to physical address
+    pub fn translate_address(&self, virt_addr: VirtAddr, is_user: bool, need_write: bool) -> Option<PhysAddr> {
+        let inner = self.current.as_ref()?.inner_exclusive_access();
+        inner.translate_address(virt_addr, is_user, need_write)
+    }
+
+    /// get a byte of a specific virtual address
+    pub fn get_memory(&self, virt_addr: usize, is_user: bool) -> Option<u8> {
+        let inner = &self.current.as_ref()?.inner_exclusive_access();
+        inner.get_memory(VirtAddr::from(virt_addr), is_user)
+    }
+
+    /// set a byte of a specific virtual address
+    pub fn set_memory(&self, virt_addr: usize, value: u8, is_user: bool) -> Option<()> {
+        let inner = self.current.as_ref()?.inner_exclusive_access();
+        inner.set_memory(VirtAddr::from(virt_addr), value, is_user)
+    }
+
+    /// map virtual address [start, start + len) to physical address, aligned to PAGE_SIZE
+    pub fn map(&self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
+        let Some(current) = self.current.as_ref() else { return false; };
+        let inner = &mut current.inner_exclusive_access();
+        inner.map(start, len, permission)
+    }
+
+    /// unmap virtual address [start, start + len)
+    pub fn unmap(&self, start: VirtAddr, len: usize) -> bool {
+        let Some(current) = self.current.as_ref() else { return false; };
+        let inner = &mut current.inner_exclusive_access();
+        inner.unmap(start, len)
+    }
 }
 
 lazy_static! {
+    /// Global processor
     pub static ref PROCESSOR: UPSafeCell<Processor> = unsafe { UPSafeCell::new(Processor::new()) };
 }
 

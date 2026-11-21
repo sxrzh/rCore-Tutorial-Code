@@ -3,12 +3,17 @@ use alloc::sync::Arc;
 
 use crate::{
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{translated_refmut, translated_str, MapPermission},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
+        PROCESSOR,
     },
+    timer::get_time_us,
 };
+
+
+use core::mem::size_of;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -105,30 +110,57 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
+    trace!("kernel: sys_get_time");
+    const SIZE: usize = size_of::<TimeVal>();
+    let mut data = [0u8; SIZE];
+    let buf = data.as_mut_ptr() as *mut TimeVal;
+
+    let us = get_time_us();
+    unsafe {
+        *buf = TimeVal {
+            sec: us / 1_000_000,
+            usec: us % 1_000_000,
+        };
+    }
+
+    for i in 0..SIZE {
+        if let Some(phys_addr) = PROCESSOR.exclusive_access().translate_address((ts as usize + i).into(), true, true) {
+            unsafe {
+                let ts_real = phys_addr.0 as *mut u8;
+                *ts_real = data[i];
+            }
+        }
+        else {
+            return -1;
+        }
+    }
+    0
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// map virtual memory
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    trace!("kernel: sys_mmap");
+    if prot & 0x7 == 0 { return -1; }
+    if prot & !0x7 != 0 { return -1; }
+    if PROCESSOR.exclusive_access().map(start.into(), len, 
+        MapPermission::from_bits_truncate((prot << 1) as u8) | MapPermission::U) {
+            0
+        }
+        else {
+            -1
+        }
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// unmap virtual memory
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    trace!("kernel: sys_munmap");
+    if PROCESSOR.exclusive_access().unmap(start.into(), len) {
+        0
+    }
+    else {
+        -1
+    }
 }
 
 /// change data segment size
