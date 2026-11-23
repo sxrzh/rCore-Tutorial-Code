@@ -181,28 +181,10 @@ pub fn sys_spawn(path: *const u8) -> isize {
         current_task().unwrap().pid.0,
     );
 
-    // info!("in spawn: token = {}", current_user_token());
-    // info!("in spawn: translated path = {}", translated_str(current_user_token(), _path));
-    // // -1
-    // let pid = sys_fork();
-    // info!("in current pid = {}: pid = {}", current_task().unwrap().pid.0, pid);
-    // if pid == 0 {
-    //     info!("HHH");
-    //     if sys_exec(_path) == -1 {
-    //         return -1;
-    //     }
-    //     info!("AAA");
-    //     unreachable!()
-    // }
-    // else {
-    //     info!("spawned pid = {}", pid);
-    //     sys_yield();
-    //     pid
-    // }
-
-    // Above is wrong, because sys_fork uses TaskControlBlock::fork to create new process,
+    // We can't just call sys_fork and sys_exec sequentially, 
+    // because sys_fork uses TaskControlBlock::fork to create new process,
     // which sets ra of the new process to trap_return (TaskContext::goto_trap_return),
-    // then the new process won't continue the 'pid == 0' branch
+    // then the new process won't continue the 'pid == 0' branch.
 
     let token = current_user_token();
     let path = translated_str(token, path);
