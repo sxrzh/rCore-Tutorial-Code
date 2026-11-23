@@ -1,5 +1,5 @@
 //! Process management syscalls
-use alloc::sync::Arc;
+use alloc::{sync::Arc};
 
 use crate::{
     loader::get_app_data_by_name,
@@ -175,12 +175,50 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
+pub fn sys_spawn(path: *const u8) -> isize {
     trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
+        "kernel:pid[{}] sys_spawn",
+        current_task().unwrap().pid.0,
     );
-    -1
+
+    // info!("in spawn: token = {}", current_user_token());
+    // info!("in spawn: translated path = {}", translated_str(current_user_token(), _path));
+    // // -1
+    // let pid = sys_fork();
+    // info!("in current pid = {}: pid = {}", current_task().unwrap().pid.0, pid);
+    // if pid == 0 {
+    //     info!("HHH");
+    //     if sys_exec(_path) == -1 {
+    //         return -1;
+    //     }
+    //     info!("AAA");
+    //     unreachable!()
+    // }
+    // else {
+    //     info!("spawned pid = {}", pid);
+    //     sys_yield();
+    //     pid
+    // }
+
+    // Above is wrong, because sys_fork uses TaskControlBlock::fork to create new process,
+    // which sets ra of the new process to trap_return (TaskContext::goto_trap_return),
+    // then the new process won't continue the 'pid == 0' branch
+
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    let Some(data) = get_app_data_by_name(path.as_str()) else {
+        return -1;
+    };
+
+    let current_task = current_task().unwrap();
+    let new_task = current_task.fork();
+    let new_pid = new_task.pid.0;
+    let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    trap_cx.x[10] = 0;
+
+    new_task.exec(data);
+    add_task(new_task);
+    new_pid as isize
 }
 
 // YOUR JOB: Set task priority.
