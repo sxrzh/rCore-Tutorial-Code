@@ -1,7 +1,7 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::{TRAP_CONTEXT_BASE, PAGE_SIZE};
+use crate::config::{TRAP_CONTEXT_BASE, PAGE_SIZE, BIG_STRIDE, INITIAL_PRIORITY};
 use crate::mm::{MapPermission, MemorySet, PhysAddr, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
@@ -33,6 +33,31 @@ impl TaskControlBlock {
     pub fn get_user_token(&self) -> usize {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
+    }
+    /// Add the stride by one step
+    pub fn stride_step(&self) {
+        self.inner_exclusive_access().stride_step()
+    }
+    /// Set priority
+    pub fn set_priority(&self, prio: usize) -> bool {
+        self.inner_exclusive_access().set_priority(prio)
+    }
+}
+
+impl PartialEq for TaskControlBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner_exclusive_access().stride == other.inner_exclusive_access().stride
+    }
+}
+impl Eq for TaskControlBlock {}
+impl Ord for TaskControlBlock {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        other.inner_exclusive_access().stride.cmp(&self.inner_exclusive_access().stride)
+    }
+}
+impl PartialOrd for TaskControlBlock {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -68,6 +93,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Stride value for task scheduling
+    pub stride: usize,
+
+    /// Pass value for task scheduling
+    pub stride_pass: usize,
 }
 
 impl TaskControlBlockInner {
@@ -112,6 +143,27 @@ impl TaskControlBlockInner {
     pub fn unmap(&mut self, start: VirtAddr, len: usize) -> bool {
         self.memory_set.unmap(start, len)
     }
+
+    /// calculate stride_pass from priority
+    pub fn calc_pass(prio: usize) -> usize {
+        BIG_STRIDE / prio
+    }
+    
+    /// implement stride_step
+    pub fn stride_step(&mut self) {
+        self.stride += self.stride_pass
+    }
+
+    /// implement set_priority
+    pub fn set_priority(&mut self, prio: usize) -> bool {
+        if prio >= 2 {
+            self.stride_pass = Self::calc_pass(prio);
+            true
+        }
+        else {
+            false
+        }
+    }
 }
 
 impl TaskControlBlock {
@@ -145,6 +197,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    stride_pass: TaskControlBlockInner::calc_pass(INITIAL_PRIORITY),
                 })
             },
         };
@@ -162,7 +216,6 @@ impl TaskControlBlock {
 
     /// Load a new elf to replace the original application address space and start execution
     pub fn exec(&self, elf_data: &[u8]) {
-        info!("TaskCB::exec");
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
@@ -219,6 +272,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: 0,      // a new process
+                    stride_pass: parent_inner.stride_pass,
                 })
             },
         });
