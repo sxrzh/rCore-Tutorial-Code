@@ -205,7 +205,7 @@ pub fn sys_spawn(path: *const u8) -> isize {
 
 // YOUR JOB: Set task priority.
 pub fn sys_set_priority(prio: isize) -> isize {
-    info!(
+    trace!(
         "kernel:pid[{}] sys_set_priority {}",
         current_task().unwrap().pid.0, prio
     );
