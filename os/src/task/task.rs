@@ -1,13 +1,17 @@
 //! Types related to task management & Functions for completely changing TCB
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-use crate::config::{TRAP_CONTEXT_BASE, PAGE_SIZE, BIG_STRIDE, INITIAL_PRIORITY};
+use crate::config::{TRAP_CONTEXT_BASE, PAGE_SIZE, INITIAL_PRIORITY};
 use crate::mm::{MapPermission, MemorySet, PhysAddr, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use core::cmp::min;
+
+use crate::task::stride::*;
+use crate::task::manager::TASK_MANAGER;
 
 /// Task control block structure
 ///
@@ -52,7 +56,7 @@ impl PartialEq for TaskControlBlock {
 impl Eq for TaskControlBlock {}
 impl Ord for TaskControlBlock {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        other.inner_exclusive_access().stride.cmp(&self.inner_exclusive_access().stride)
+        self.inner_exclusive_access().stride.cmp(&other.inner_exclusive_access().stride)
     }
 }
 impl PartialOrd for TaskControlBlock {
@@ -95,10 +99,10 @@ pub struct TaskControlBlockInner {
     pub program_brk: usize,
 
     /// Stride value for task scheduling
-    pub stride: usize,
+    pub stride: Stride,
 
     /// Pass value for task scheduling
-    pub stride_pass: usize,
+    pub stride_pass: StridePass,
 }
 
 impl TaskControlBlockInner {
@@ -145,13 +149,13 @@ impl TaskControlBlockInner {
     }
 
     /// calculate stride_pass from priority
-    pub fn calc_pass(prio: usize) -> usize {
-        BIG_STRIDE / prio
+    pub fn calc_pass(prio: usize) -> StridePass {
+        StridePass::from_prio(prio)
     }
     
     /// implement stride_step
     pub fn stride_step(&mut self) {
-        self.stride += self.stride_pass
+        self.stride.add(self.stride_pass)
     }
 
     /// implement set_priority
@@ -167,10 +171,8 @@ impl TaskControlBlockInner {
 }
 
 impl TaskControlBlock {
-    /// Create a new process
-    ///
-    /// At present, it is only used for the creation of initproc
-    pub fn new(elf_data: &[u8]) -> Self {
+    /// Create a new process with default stride
+    fn new_with_default_stride(elf_data: &[u8], default_stride: Stride) -> Self {
         // memory_set with elf program headers/trampoline/trap context/user stack
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
         let trap_cx_ppn = memory_set
@@ -197,11 +199,15 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
-                    stride: 0,
+                    stride: TASK_MANAGER.exclusive_access()
+                                .min_stride()
+                                .map(|s| Stride(min(s.0, default_stride.0)))
+                                .unwrap_or(default_stride),
                     stride_pass: TaskControlBlockInner::calc_pass(INITIAL_PRIORITY),
                 })
             },
         };
+        info!("in new: new stride = {}", task_control_block.inner_exclusive_access().stride.0);
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
@@ -212,6 +218,13 @@ impl TaskControlBlock {
             trap_handler as usize,
         );
         task_control_block
+    }
+
+    /// Create a new process
+    ///
+    /// At present, it is only used for the creation of initproc and spawn
+    pub fn new(elf_data: &[u8]) -> Self {
+        Self::new_with_default_stride(elf_data, Stride::default())
     }
 
     /// Load a new elf to replace the original application address space and start execution
@@ -272,11 +285,15 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
-                    stride: 0,      // a new process
+                    stride: TASK_MANAGER.exclusive_access()
+                                .min_stride()
+                                .map(|s| Stride(min(s.0, parent_inner.stride.0)))
+                                .unwrap_or(parent_inner.stride),
                     stride_pass: parent_inner.stride_pass,
                 })
             },
         });
+        info!("in fork: new stride = {}", task_control_block.inner_exclusive_access().stride.0);
         // add child
         parent_inner.children.push(task_control_block.clone());
         // modify kernel_sp in trap_cx
@@ -293,11 +310,13 @@ impl TaskControlBlock {
     pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
         let mut parent_inner = self.inner_exclusive_access();
         
-        let new_block = Arc::new(Self::new(elf_data));
-        new_block.inner_exclusive_access().parent = Some(Arc::downgrade(self));
+        let new_block = Arc::new(Self::new_with_default_stride(elf_data, parent_inner.stride));
+        let mut new_block_inner = new_block.inner_exclusive_access();
+        new_block_inner.parent = Some(Arc::downgrade(self));
 
         parent_inner.children.push(new_block.clone());
 
+        drop(new_block_inner);
         new_block
     }
 

@@ -1,6 +1,7 @@
 //!Implementation of [`TaskManager`]
 use super::TaskControlBlock;
 use crate::sync::UPSafeCell;
+use crate::task::stride::Stride;
 // use alloc::collections::VecDeque;
 use alloc::collections::BinaryHeap;
 use alloc::sync::Arc;
@@ -52,6 +53,15 @@ impl TaskManager {
     /// Add process back to ready queue
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push(task);
+    }
+    /// Get MinStride but do not pop it
+    pub fn min_stride(&self) -> Option<Stride> {
+        if let Some(task) = self.ready_queue.peek() {
+            Some(task.inner_exclusive_access().stride)
+        }
+        else {
+            None
+        }
     }
     /// Take a process out of the ready queue
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
