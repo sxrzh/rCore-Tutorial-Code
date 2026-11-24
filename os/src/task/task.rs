@@ -207,7 +207,6 @@ impl TaskControlBlock {
                 })
             },
         };
-        info!("in new: new stride = {}", task_control_block.inner_exclusive_access().stride.0);
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
@@ -293,7 +292,6 @@ impl TaskControlBlock {
                 })
             },
         });
-        info!("in fork: new stride = {}", task_control_block.inner_exclusive_access().stride.0);
         // add child
         parent_inner.children.push(task_control_block.clone());
         // modify kernel_sp in trap_cx

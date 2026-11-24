@@ -15,25 +15,14 @@ impl Default for Stride {
 }
 impl Ord for Stride {
     fn cmp(&self, other: &Self) -> Ordering {
-        // 134217728
-        // 1073741824 
-        11728481943552 as u64;
         const THRES: u64 = (BIG_STRIDE as u64 + 1) / 2;
         if other.0 < self.0 {
-            // Ordering::Less
             if self.0 - other.0 <= THRES { Ordering::Less }
-            else {
-                panic!("{} - {} > THRES, not L", self.0, other.0);
-                // Ordering::Greater
-            } 
+            else {  Ordering::Greater } 
         }
         else if other.0 > self.0 {
-            // Ordering::Greater
             if other.0 - self.0 <= THRES { Ordering::Greater }
-            else {
-                panic!("{} - {} > THRES, not G", other.0, self.0);
-                // Ordering::Less
-            }
+            else { Ordering::Less }
         }
         else {
             Ordering::Equal
@@ -55,7 +44,6 @@ impl Eq for Stride {}
 
 impl Stride {
     pub fn add(&mut self, pass: StridePass) {
-        // info!("{} += {} -> {}", self.0, pass.0, self.0 + pass.0);
         self.0 += pass.0
     }
 }
