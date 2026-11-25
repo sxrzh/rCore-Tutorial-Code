@@ -12,6 +12,8 @@ use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::cmp::{min, max};
+// use alloc::vec;
 use lazy_static::*;
 use riscv::register::satp;
 
@@ -282,7 +284,10 @@ impl MemorySet {
         if let Some(_) = self
             .areas
             .iter_mut()
-            .find(|area| area.vpn_range.get_start() < vpn_end && area.vpn_range.get_end() > vpn_begin )
+            .find(
+                |area| area.vpn_range.get_start() < area.vpn_range.get_end() 
+                    && area.vpn_range.get_start() < vpn_end && area.vpn_range.get_end() > vpn_begin
+            )
         {
             // range contains allocated page
             false
@@ -303,20 +308,56 @@ impl MemorySet {
         if let Some(area) = self
             .areas
             .iter_mut()
-            .find(|area| area.vpn_range.get_start() == vpn_begin)
+            .find(|area| vpn_begin > area.vpn_range.get_start() && vpn_end < area.vpn_range.get_end())
         {
-            // range contains unallocated page
-            if area.vpn_range.get_end() < vpn_end {
-                false
-            }
-            else {
-                area.shrink_left_to(&mut self.page_table, vpn_end);
-                true
-            }
+            // [start, start + len) splits 1 area into 2 areas
+            let range_new = VPNRange::new(vpn_end, area.vpn_range.get_end());
+            let (map_type, map_perm) = (area.map_type, area.map_perm);
+            area.vpn_range = VPNRange::new(area.vpn_range.get_start(), vpn_end);
+            area.shrink_to(&mut self.page_table, vpn_begin);
+            self.areas.push(MapArea::new(range_new.get_start().into(), range_new.get_end().into(), map_type, map_perm));
+            true
         }
         else {
-            // start is unallocated or is not an address returned by map
-            false
+            let mut intersect: Vec<VPNRange> = self
+                .areas
+                .iter_mut()
+                .filter_map(
+                    |area| -> Option<VPNRange> {
+                        let left = max(area.vpn_range.get_start(), vpn_begin);
+                        let right = min(area.vpn_range.get_end(), vpn_end);
+                        if left < right {
+                            if left == area.vpn_range.get_start() && right == area.vpn_range.get_end() {
+                                area.shrink_to(&mut self.page_table, left);
+                            }
+                            else if left == area.vpn_range.get_start() {
+                                area.shrink_left_to(&mut self.page_table, right);
+                            }
+                            else if right == area.vpn_range.get_end() {
+                                area.shrink_to(&mut self.page_table, left);
+                            }
+                            Some(VPNRange::new(left, right))
+                        }
+                        else {
+                            None
+                        }
+                    }
+                )
+                .collect();
+            intersect.sort_by(|range_a, range_b| range_a.get_start().cmp(&range_b.get_start()));
+            
+            // If there are unmapped pages in range, return false.
+            // Currently we haven't implemented the restoration when error occurs.
+            let Some(first) = intersect.first() else { return false; };
+            let Some(last) = intersect.last() else { return false; };
+            if first.get_start() != vpn_begin || last.get_end() != vpn_end { return false; }
+            for i in  1..intersect.len() {
+                if intersect[i].get_start() != intersect[i - 1].get_end() {
+                    return false;
+                }
+            }
+
+            true
         } 
     }
 }
