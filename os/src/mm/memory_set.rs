@@ -311,11 +311,8 @@ impl MemorySet {
             .find(|area| vpn_begin > area.vpn_range.get_start() && vpn_end < area.vpn_range.get_end())
         {
             // [start, start + len) splits 1 area into 2 areas
-            let range_new = VPNRange::new(vpn_end, area.vpn_range.get_end());
-            let (map_type, map_perm) = (area.map_type, area.map_perm);
-            area.vpn_range = VPNRange::new(area.vpn_range.get_start(), vpn_end);
-            area.shrink_to(&mut self.page_table, vpn_begin);
-            self.areas.push(MapArea::new(range_new.get_start().into(), range_new.get_end().into(), map_type, map_perm));
+            let new_area = area.split(&mut self.page_table, VPNRange::new(vpn_begin, vpn_end));
+            self.areas.push(new_area);
             true
         }
         else {
@@ -418,7 +415,6 @@ impl MapArea {
             self.unmap_one(page_table, vpn);
         }
     }
-    #[allow(unused)]
     pub fn shrink_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
         for vpn in VPNRange::new(new_end, self.vpn_range.get_end()) {
             self.unmap_one(page_table, vpn)
@@ -430,6 +426,18 @@ impl MapArea {
             self.unmap_one(page_table, vpn)
         }
         self.vpn_range = VPNRange::new(new_start, self.vpn_range.get_end());
+    }
+    pub fn split(&mut self, page_table: &mut PageTable, cut: VPNRange) -> MapArea {
+        let mut new_area = Self::new(
+            cut.get_end().into(), self.vpn_range.get_end().into(),
+            self.map_type, self.map_perm
+        );
+        for i in new_area.vpn_range {
+            new_area.data_frames.insert(i, self.data_frames.remove(&i).unwrap());
+        }
+        self.vpn_range = VPNRange::new(self.vpn_range.get_start(), cut.get_end());
+        self.shrink_to(page_table, cut.get_start());
+        new_area
     }
     #[allow(unused)]
     pub fn append_to(&mut self, page_table: &mut PageTable, new_end: VirtPageNum) {
